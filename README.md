@@ -5,7 +5,8 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vuedotjs&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
 ![LangChain](https://img.shields.io/badge/LangChain-Agent-1C3C3C?logo=langchain&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-FastMCP-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
@@ -13,7 +14,7 @@
 ## 核心能力
 
 - **真实数据查询**：Agent 通过 MCP 工具读取当前学生的课表、作业和成绩，而不是由模型凭空生成。
-- **个人知识库 RAG**：上传 PDF、DOCX、TXT、Markdown 后自动切片、向量化；检索结果强制按当前用户隔离，并在回答中保留来源。
+- **个人知识库混合检索**：上传 PDF、DOCX、TXT、Markdown 后自动切片、向量化；查询经过改写后同时走向量与关键词召回，再经 RRF、Rerank 融合，结果强制按当前用户隔离并保留来源。
 - **可观测的流式对话**：FastAPI 以 SSE 推送工具开始、工具结束、文本增量和完成事件，前端可展示完整调用过程。
 - **学习闭环**：课程助手不仅回答问题，还能生成可勾选的学习计划，并基于资料生成带间隔重复机制的复习卡片。
 - **学生/管理员双端**：学生维护自己的课程数据；管理员维护课程、课表、作业、成绩、文档与用户。
@@ -63,7 +64,7 @@ MCP Server 以 `stdio` 子进程方式随对话启动，当前提供 6 个工具
 | 工具 | 用途 |
 | --- | --- |
 | `get_my_schedule` | 查询当前学生的完整课表 |
-| `search_course_documents` | 在个人资料中做语义检索并返回来源片段 |
+| `search_course_documents` | 在个人资料中做混合检索并返回 Top-10 来源片段 |
 | `list_my_documents` | 查看当前学生已上传的资料 |
 | `save_study_plan` | 保存学习计划及可勾选任务 |
 | `get_upcoming_assignments` | 查询未来若干天内及已逾期的未完成作业 |
@@ -90,7 +91,8 @@ flowchart LR
         EMBED["本地向量模型<br/>bge-small-zh-v1.5"]
     end
 
-    DB[("SQLite / MySQL<br/>业务数据与对话记录")]
+    DB[("PostgreSQL 16 + pgvector<br/>业务数据与向量索引")]
+    CACHE[("Redis 7<br/>Query Rewrite / 检索缓存")]
 
     STUDENT --> API
     ADMIN --> API
@@ -101,6 +103,7 @@ flowchart LR
     SSE --> AGENT
     AGENT -->|工具调用| MCP
     MCP --> DB
+    MCP --> CACHE
     AGENT -->|流式事件| SSE
 ```
 
@@ -114,7 +117,12 @@ MCP 工具本身接收 `user_id`，但 Agent 侧通过 `UserBoundTool` 在执行
 
 - 支持 `.pdf`、`.docx`、`.txt`、`.md`，单文件上限 10 MB。
 - 按段落聚合为约 500 字的切片，使用 `BAAI/bge-small-zh-v1.5` 在本地生成向量。
-- 向量以 JSON 文本保存在 `document_chunks` 中，检索时先按 `user_id` 过滤，再计算余弦相似度并返回 Top-K。
+- Query Rewrite 由一个轻量 LLM 调用生成 2 个变体，失败时使用本地关键词变体；原始查询和 2 个变体分别执行向量与中文关键词双路召回，共最多 6 路。
+- 向量通道使用 PostgreSQL + pgvector，索引固定参数 `m=24`、`ef_construction=200`，查询会话设置 `hnsw.ef_search=100`。
+- 关键词通道使用 Jieba `cut_for_search` 分词并写入 `search_text`，由 PostgreSQL `tsvector + ts_rank_cd` 执行 OR 宽召回和 AND 全覆盖加分。
+- 6 路候选使用 RRF 融合（`K=60`），取 `Top-K × 2` 进入 Rerank；Rerank 分数低于 `0.1` 的结果过滤，调用失败则保持 RRF 顺序。
+- 最终同一文档最多保留 2 个片段，去重后返回默认 Top-10。向量和文档内容均先按 `user_id` 过滤，避免跨用户召回。
+- Redis 缓存 Query Rewrite 10 分钟、最终检索结果 60 秒；文档入库、删除或重新索引时主动失效该用户的检索缓存。
 - Agent 被约束为仅依据检索片段回答；资料不足时明确回复“资料中未找到”。
 
 **流式对话与可观测性**
@@ -137,8 +145,8 @@ MCP 工具本身接收 `user_id`，但 Agent 侧通过 `UserBoundTool` 在执行
 | 后端 | FastAPI、SQLAlchemy 2.0、Pydantic 2、PyJWT |
 | Agent | LangChain、DeepSeek OpenAI 兼容接口 |
 | 工具协议 | MCP / FastMCP、`langchain-mcp-adapters` |
-| RAG | FastEmbed、`BAAI/bge-small-zh-v1.5`、余弦相似度 |
-| 数据库 | SQLite（开发默认）/ MySQL 8（Docker 配置） |
+| RAG | FastEmbed、pgvector HNSW、Jieba、tsvector、RRF、智谱 Rerank |
+| 存储 | PostgreSQL 16 + pgvector、Redis 7 |
 | 部署 | Docker Compose、Nginx、Uvicorn |
 
 ## 项目结构
@@ -179,9 +187,16 @@ course-agent/
 - Python 3.11+
 - Node.js 20.19+ 或 22.12+、npm
 - DeepSeek API Key（聊天与复习卡片生成需要）
-- MySQL 8（仅 Docker Compose 方案需要；本地默认使用 SQLite）
+- PostgreSQL 16 + pgvector 扩展
+- Redis 7
 
-### 方式一：本地开发（默认 SQLite）
+### 方式一：本地开发（PostgreSQL + Redis）
+
+先启动数据库与缓存；也可以使用本机已安装的 PostgreSQL/Redis：
+
+```powershell
+docker compose up -d db redis
+```
 
 先创建 `backend/.env`：
 
@@ -189,6 +204,8 @@ course-agent/
 DEEPSEEK_API_KEY=sk-...
 JWT_SECRET=replace-with-a-random-secret
 SEMESTER_START=2026-09-07
+DATABASE_URL=postgresql+psycopg://course:123456@127.0.0.1:5432/course_agent
+REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
 启动后端：
@@ -225,9 +242,9 @@ python -m scripts.self_check
 
 > `python -m app.seed` 会删除并重建用户、课程、课表、计划和文档等基础数据，再写入演示内容，建议只在空开发库执行一次。首次使用 RAG 时如果本地没有模型缓存，系统会自动下载 `bge-small-zh-v1.5`，需要访问模型源。
 
-### 方式二：Docker Compose（复用宿主机 MySQL）
+### 方式二：Docker Compose（PostgreSQL + Redis + 前后端）
 
-Docker 方案的后端容器连接宿主机的 MySQL 8，上传文件保存在命名卷 `uploads` 中。
+Docker 方案会启动 `pgvector/pgvector:pg16`、`redis:7-alpine`、后端和前端；数据库、缓存和上传文件分别使用命名卷持久化。
 
 1. 在项目根目录创建 `.env`：
 
@@ -237,13 +254,7 @@ JWT_SECRET=replace-with-a-random-secret
 SEMESTER_START=2026-09-07
 ```
 
-2. 在宿主机创建数据库和容器访问账号：
-
-```powershell
-mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS course_agent CHARACTER SET utf8mb4; CREATE USER IF NOT EXISTS 'course'@'%' IDENTIFIED BY '123456'; GRANT ALL PRIVILEGES ON course_agent.* TO 'course'@'%'; FLUSH PRIVILEGES;"
-```
-
-3. 构建并启动：
+2. 构建并启动：
 
 ```powershell
 docker compose up -d --build
@@ -251,7 +262,7 @@ docker compose exec backend python -m app.seed
 docker compose exec backend python -m scripts.self_check
 ```
 
-4. 访问 <http://localhost:5173>。
+3. 访问 <http://localhost:5173>。
 
 容器模式下，Nginx 将 `/api` 反向代理到后端，因此前端无需额外配置接口地址。后端服务没有直接映射到宿主机端口；排查问题可运行 `docker compose logs -f backend`。
 
@@ -272,17 +283,29 @@ docker compose exec backend python -m scripts.self_check
 | `DEEPSEEK_API_KEY` | `sk-...` | DeepSeek API Key，对话和卡片生成必需 |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | DeepSeek OpenAI 兼容接口地址 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | 对话模型 |
-| `DATABASE_URL` | `sqlite:///./course_agent.db` | SQLAlchemy 连接串；Docker 中注入 MySQL 地址 |
+| `DATABASE_URL` | `postgresql+psycopg://course:123456@127.0.0.1:5432/course_agent` | PostgreSQL + pgvector 连接串 |
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis 连接串 |
 | `DATABASE_NAME` | 空 | 可选，覆盖连接串中的数据库名 |
 | `SEMESTER_START` | `2026-09-07` | 学期第一周周一，用于计算当前教学周 |
 | `JWT_SECRET` | 开发默认值 | JWT 签名密钥，部署时必须更换 |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` | 登录令牌有效期，默认 24 小时 |
 | `FASTEMBED_CACHE_PATH` | `backend/data/fastembed_cache` | 可选，覆盖本地向量模型缓存目录 |
+| `RAG_TOP_K` | `10` | 混合检索最终返回条数 |
+| `RAG_RRF_K` | `60` | RRF 排名平滑常数 |
+| `HNSW_M` | `24` | HNSW 每个节点的连接数 |
+| `HNSW_EF_CONSTRUCTION` | `200` | HNSW 建图搜索广度 |
+| `HNSW_EF_SEARCH` | `100` | HNSW 查询搜索广度 |
+| `RAG_QUERY_CACHE_TTL_SECONDS` | `600` | Query Rewrite Redis 缓存时间 |
+| `RAG_RESULT_CACHE_TTL_SECONDS` | `60` | 最终检索结果 Redis 缓存时间 |
+| `RERANK_API_KEY` | 空 | 智谱 Rerank Key；未配置时保持 RRF 排序 |
+| `RERANK_MODEL` | `rerank` | Rerank 模型名 |
+| `RERANK_MIN_SCORE` | `0.1` | Rerank 最低保留分 |
 
-数据库使用 MySQL 时，可在 `backend/.env` 中配置：
+若 PostgreSQL 或 Redis 不在默认地址，可在 `backend/.env` 中覆盖：
 
 ```dotenv
-DATABASE_URL=mysql+pymysql://用户名:密码@127.0.0.1:3306/course_agent?charset=utf8mb4
+DATABASE_URL=postgresql+psycopg://用户名:密码@127.0.0.1:5432/course_agent
+REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
 ## 接口概览
@@ -316,6 +339,14 @@ python -m scripts.mcp_check
 - `self_check`：直接调用课表/计划工具，并对示例讲义执行切片、向量化和检索，同时验证跨用户检索隔离。
 - `mcp_check`：启动 MCP stdio 客户端，验证 6 个工具可加载、用户绑定生效。该脚本会写入一条“MCP自检计划”，建议在开发库执行。
 
+后端自动化测试：
+
+```powershell
+cd backend
+python -m pip install -r requirements-dev.txt
+python -m pytest -q tests
+```
+
 前端构建检查：
 
 ```powershell
@@ -327,11 +358,12 @@ npm run build
 
 当前版本面向课程设计和本地演示：
 
-- 后端启动时通过 `Base.metadata.create_all` 自动建表，尚未接入 Alembic 迁移。
+- 后端启动时自动创建 pgvector 扩展、业务表和 HNSW/GIN 索引，尚未接入 Alembic 迁移。
+- PostgreSQL 保存业务数据、512 维向量和 Jieba 检索文本；Redis 保存 Query Rewrite（10 分钟）与最终检索结果（60 秒）缓存。
 - 默认 CORS 只允许 `localhost:5173` 和 `127.0.0.1:5173`，正式部署需调整。
 - 默认 JWT 密钥仅供开发使用，生产环境必须通过环境变量覆盖。
 - 对话与资料问答依赖外部 DeepSeek 服务；文档向量化模型在本地运行。
-- 目前以脚本自检和前端构建作为验证手段，尚未建立完整的自动化测试套件。
+- RAG 单元测试覆盖 RRF、Top-10、单文档两段、Redis Key/TTL、pgvector 类型和索引参数；完整链路仍需在 PostgreSQL 与 Redis 服务上执行自检。
 
 ## 文档
 

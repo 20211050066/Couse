@@ -1,10 +1,11 @@
-"""文档切片 + 向量化 + 写入 document_chunks。"""
-import json
+"""文档切片 + 向量化 + Jieba 检索文本写入 document_chunks。"""
 
 from sqlalchemy.orm import Session
 
 from app.models.document import CourseDocument, DocumentChunk
+from app.rag.cache import invalidate_user_search_cache
 from app.rag.embedder import embed_texts
+from app.rag.keyword_search import tokenize_for_search
 
 CHUNK_SIZE = 500  # 每块约 500 字
 
@@ -41,8 +42,12 @@ def index_document(db: Session, doc: CourseDocument, text: str) -> None:
                 document_id=doc.id,
                 chunk_index=i,
                 content=chunk,
-                embedding=json.dumps(vec),
+                search_text=" ".join(
+                    tokenize_for_search(chunk, deduplicate=False)
+                ),
+                embedding=vec,
             )
         )
     doc.status = "ready"
     db.commit()
+    invalidate_user_search_cache(doc.user_id)

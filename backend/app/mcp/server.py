@@ -49,8 +49,8 @@ def get_my_schedule(user_id: int) -> list[dict]:
 
 
 @mcp.tool()
-def search_course_documents(user_id: int, query: str, top_k: int = 3) -> list[dict]:
-    """在指定学生的课程资料中做语义检索（RAG），返回最相关的片段及来源文件名。"""
+def search_course_documents(user_id: int, query: str, top_k: int = 10) -> list[dict]:
+    """混合检索指定学生的课程资料，返回 RRF/Rerank 排序后的 Top-K 片段。"""
     db: Session = SessionLocal()
     try:
         return retrieve(db, user_id, query, top_k)

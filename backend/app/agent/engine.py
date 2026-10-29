@@ -57,11 +57,8 @@ def bind_user(tools: list[BaseTool], user_id: int) -> list[BaseTool]:
 
 
 def _absolute_db_url() -> str:
-    """把相对路径的 SQLite URL 转成绝对路径，保证 MCP 子进程能找到同一个库。"""
-    url = settings.effective_database_url
-    if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
-        return f"sqlite:///{BACKEND_DIR / url.removeprefix('sqlite:///')}"
-    return url
+    """MCP 子进程使用与主进程相同的 PostgreSQL 连接串。"""
+    return settings.effective_database_url
 
 
 def mcp_client_config() -> dict:
@@ -74,6 +71,13 @@ def mcp_client_config() -> dict:
             "env": {
                 "PYTHONPATH": str(BACKEND_DIR),
                 "DATABASE_URL": _absolute_db_url(),
+                "DEEPSEEK_API_KEY": settings.deepseek_api_key,
+                "DEEPSEEK_BASE_URL": settings.deepseek_base_url,
+                "DEEPSEEK_MODEL": settings.deepseek_model,
+                "RERANK_API_KEY": settings.rerank_api_key,
+                "RERANK_BASE_URL": settings.rerank_base_url,
+                "RERANK_MODEL": settings.rerank_model,
+                "REDIS_URL": settings.redis_url,
             },
         }
     }

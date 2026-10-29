@@ -6,8 +6,22 @@ r"""初始化数据库并写入模拟数据。
 from pathlib import Path
 
 from app.core.security import hash_password
-from app.database import Base, SessionLocal, engine
-from app.models import Assignment, Course, CourseDocument, Schedule, Score, StudyPlan, User
+from app.database import SessionLocal, initialize_database
+from app.models import (
+    AiConversation,
+    AiMessage,
+    Assignment,
+    Course,
+    CourseDocument,
+    DocumentChunk,
+    Flashcard,
+    Schedule,
+    Score,
+    StudyPlan,
+    StudyPlanItem,
+    User,
+)
+from app.rag.cache import invalidate_all_search_cache
 
 SAMPLE_DOC_PATH = (
     Path(__file__).resolve().parent.parent / "data" / "sample_docs" / "程序设计基础讲义.md"
@@ -67,19 +81,27 @@ SCORES = [
 
 def seed():
     # 先建表（seed 脚本独立运行，不经过 FastAPI 启动流程）
-    Base.metadata.create_all(bind=engine)
+    initialize_database()
 
     print("== 清空旧数据 ==")
     db = SessionLocal()
     try:
+        db.query(AiMessage).delete()
+        db.query(AiConversation).delete()
+        db.query(Flashcard).delete()
+        db.query(StudyPlanItem).delete()
         db.query(StudyPlan).delete()
+        db.query(Assignment).delete()
+        db.query(Score).delete()
         db.query(Schedule).delete()
+        db.query(DocumentChunk).delete()
         db.query(CourseDocument).delete()
         db.query(Course).delete()
         db.query(User).delete()
         db.commit()
     finally:
         db.close()
+    invalidate_all_search_cache()
 
     print("== 写入用户 ==")
     users = {

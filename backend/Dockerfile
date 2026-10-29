@@ -13,5 +13,5 @@ COPY data ./data
 
 EXPOSE 8000
 
-# lifespan 启动时自动建表（Base.metadata.create_all）
+# lifespan 启动时创建 pgvector 扩展、业务表与检索索引
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

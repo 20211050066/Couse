@@ -16,13 +16,12 @@ from app.api import (
     plans,
     schedules,
 )
-from app.database import Base, engine
+from app.database import initialize_database
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 开发阶段：启动时自动建表（正式项目改用迁移工具 Alembic）
-    Base.metadata.create_all(bind=engine)
+    initialize_database()
     yield
 
 

@@ -64,8 +64,9 @@
 | 后端 | FastAPI | REST API、登录认证、SSE、文件上传 |
 | 工具层 | MCP | 把课表查询、计划保存等业务能力封装成标准工具 |
 | 智能体 | LangChain ReAct Agent | 解析用户意图，决定调用哪些工具、组织回答 |
-| 知识库 | RAG（向量化 + 检索） | 文档切片、向量化、相似度检索 |
-| 数据库 | SQLite（开发）/ MySQL（可选）+ SQLAlchemy | 业务数据落库 |
+| 知识库 | 混合检索 RAG | 文档切片、向量化、HNSW、关键词召回、RRF、Rerank |
+| 数据库 | PostgreSQL 16 + pgvector + SQLAlchemy | 业务数据、向量与全文检索 |
+| 缓存 | Redis 7 | Query Rewrite 与检索结果缓存 |
 
 ## 7. 核心流程（示例对话）
 

@@ -1,43 +1,60 @@
-"""语义检索：按 user_id 过滤后做余弦相似度，避免越权读取他人资料。"""
-import json
-import math
-
+"""混合检索：Query Rewrite + 向量/关键词双路召回 + RRF + Rerank。"""
 from sqlalchemy.orm import Session
 
-from app.models.document import CourseDocument, DocumentChunk
+from app.config import settings
+from app.rag.cache import get_json, search_cache_key, set_json
 from app.rag.embedder import embed_query
+from app.rag.fusion import finalize_results, reciprocal_rank_fusion
+from app.rag.keyword_search import keyword_search
+from app.rag.query_rewrite import rewrite_query
+from app.rag.reranker import rerank
+from app.rag.vector_search import vector_recall
 
 
-def cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(x * x for x in b))
-    return dot / (na * nb) if na and nb else 0.0
+def _vector_recall(
+    db: Session,
+    user_id: int,
+    query: str,
+    limit: int,
+) -> list[dict]:
+    query_vector = embed_query(query)
+    return vector_recall(db, user_id, query_vector, limit)
 
 
-def retrieve(db: Session, user_id: int, query: str, top_k: int = 3) -> list[dict]:
-    """检索当前用户已 ready 的文档切片，返回 top-k。"""
-    qv = embed_query(query)
-    rows = (
-        db.query(DocumentChunk, CourseDocument.filename)
-        .join(CourseDocument, DocumentChunk.document_id == CourseDocument.id)
-        .filter(CourseDocument.user_id == user_id, CourseDocument.status == "ready")
-        .all()
+def retrieve(db: Session, user_id: int, query: str, top_k: int | None = None) -> list[dict]:
+    """混合检索当前用户资料，完整执行五步流程并返回 Top-K。"""
+    effective_top_k = settings.rag_top_k if top_k is None else max(1, top_k)
+    cache_key = search_cache_key(user_id, query, effective_top_k)
+    cached = get_json(cache_key)
+    if isinstance(cached, list):
+        return cached
+
+    recall_limit = max(effective_top_k * 2, settings.rag_recall_min)
+    queries = rewrite_query(query)
+    if not queries:
+        return []
+
+    ranked_lists: list[list[dict]] = []
+    for search_query in queries:
+        try:
+            ranked_lists.append(_vector_recall(db, user_id, search_query, recall_limit))
+        except Exception:  # noqa: BLE001
+            # 向量通道失败时仍允许关键词通道完成检索
+            ranked_lists.append([])
+        try:
+            ranked_lists.append(keyword_search(db, user_id, search_query, recall_limit))
+        except Exception:  # noqa: BLE001
+            ranked_lists.append([])
+
+    fused = reciprocal_rank_fusion(ranked_lists)
+    if not fused:
+        return []
+    rerank_candidates = fused[: effective_top_k * 2]
+    reranked, used_rerank = rerank(query, rerank_candidates)
+    results = finalize_results(
+        reranked,
+        top_k=effective_top_k,
+        use_rerank_score=used_rerank,
     )
-    scored = []
-    for chunk, filename in rows:
-        vec = json.loads(chunk.embedding or "[]")
-        if not vec:
-            continue
-        scored.append((cosine(qv, vec), chunk, filename))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [
-        {
-            "score": round(s, 4),
-            "filename": fn,
-            "chunk_index": c.chunk_index,
-            "content": c.content[:500],
-        }
-        for s, c, fn in scored[:top_k]
-    ]
+    set_json(cache_key, results, settings.rag_result_cache_ttl_seconds)
+    return results

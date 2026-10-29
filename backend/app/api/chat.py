@@ -55,7 +55,11 @@ def _extract_sources(raw) -> list | None:
         for it in data:
             if isinstance(it, dict) and ("filename" in it or "content" in it):
                 items.append(
-                    {k: it.get(k) for k in ("filename", "score", "chunk_index", "content") if k in it}
+                    {
+                        k: it.get(k)
+                        for k in ("filename", "score", "score_type", "chunk_index", "content")
+                        if k in it
+                    }
                 )
         return items or None
     return None

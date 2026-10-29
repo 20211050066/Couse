@@ -218,7 +218,9 @@ onMounted(() => {
                 <div class="sources-title">📚 检索来源</div>
                 <div v-for="(s, si) in m.sources" :key="si" class="source">
                   <span class="source-file">{{ s.filename }}</span>
-                  <span class="source-score">相似度 {{ s.score }}</span>
+                  <span class="source-score">
+                    {{ s.score_type === 'rerank' ? '精排' : '融合' }} {{ s.score }}
+                  </span>
                 </div>
               </div>
               <div v-if="m.content" class="answer md" v-html="renderMd(m.content)"></div>

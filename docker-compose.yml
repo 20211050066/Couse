@@ -1,22 +1,62 @@
-# 一键启动全栈：FastAPI 后端 + nginx 前端（复用宿主机已有的 MySQL）
+# 一键启动全栈：PostgreSQL(pgvector) + Redis + FastAPI + nginx 前端
 # 用法：
 #   1. 在本文件同目录创建 .env，写入 DEEPSEEK_API_KEY=sk-xxx
-#   2. 确保本机 MySQL 已运行，且已建库 course_agent 与用户 course（见 README）
-#   3. docker compose up -d --build
-#   4. 访问 http://localhost:5173
+#   2. docker compose up -d --build
+#   3. 访问 http://localhost:5173
 services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: course_agent
+      POSTGRES_USER: course
+      POSTGRES_PASSWORD: "123456"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U course -d course_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   backend:
     build: ./backend
     environment:
-      # host.docker.internal = 宿主机；容器后端直接使用本机 MySQL，与本地开发共用同一份数据
-      DATABASE_URL: mysql+pymysql://course:123456@host.docker.internal:3306/course_agent?charset=utf8mb4
+      DATABASE_URL: postgresql+psycopg://course:123456@db:5432/course_agent
+      REDIS_URL: redis://redis:6379/0
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      RERANK_API_KEY: ${RERANK_API_KEY:-}
+      RERANK_BASE_URL: ${RERANK_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      RERANK_MODEL: ${RERANK_MODEL:-rerank}
+      RERANK_MIN_SCORE: ${RERANK_MIN_SCORE:-0.1}
+      RAG_TOP_K: ${RAG_TOP_K:-10}
+      RAG_RRF_K: ${RAG_RRF_K:-60}
+      HNSW_M: ${HNSW_M:-24}
+      HNSW_EF_CONSTRUCTION: ${HNSW_EF_CONSTRUCTION:-200}
+      HNSW_EF_SEARCH: ${HNSW_EF_SEARCH:-100}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       SEMESTER_START: ${SEMESTER_START:-2026-09-07}
     volumes:
       - uploads:/app/data/uploads   # 上传的课程资料持久化
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -27,3 +67,5 @@ services:
 
 volumes:
   uploads:
+  pgdata:
+  redisdata:

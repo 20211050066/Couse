@@ -17,9 +17,11 @@ from app.models.assignment import Assignment
 from app.models.conversation import AiConversation, AiMessage
 from app.models.course import Course, Schedule
 from app.models.document import CourseDocument, DocumentChunk
+from app.models.flashcard import Flashcard
 from app.models.plan import StudyPlan
 from app.models.score import Score
 from app.models.user import User
+from app.rag.cache import invalidate_user_search_cache
 from app.rag.indexer import index_document
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
@@ -373,6 +375,11 @@ def delete_document(did: int, db: Session = Depends(get_db)):
     d = db.get(CourseDocument, did)
     if d is None:
         raise HTTPException(status_code=404, detail="文档不存在")
+    user_id = d.user_id
+    db.query(Flashcard).filter(Flashcard.document_id == did).update(
+        {Flashcard.document_id: None},
+        synchronize_session=False,
+    )
     db.query(DocumentChunk).filter(DocumentChunk.document_id == did).delete()
     try:
         Path(d.file_path).unlink(missing_ok=True)
@@ -380,6 +387,7 @@ def delete_document(did: int, db: Session = Depends(get_db)):
         pass
     db.delete(d)
     db.commit()
+    invalidate_user_search_cache(user_id)
     return {"ok": True}
 
 
@@ -392,6 +400,7 @@ def reindex_document(did: int, db: Session = Depends(get_db)):
     path = Path(d.file_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="原文件已丢失")
+    invalidate_user_search_cache(d.user_id)
     db.query(DocumentChunk).filter(DocumentChunk.document_id == did).delete()
     try:
         text = extract_text(path, d.file_type)

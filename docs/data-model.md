@@ -1,6 +1,6 @@
 # course-agent 数据模型设计
 
-> 约定：开发环境使用 SQLite + SQLAlchemy，字段命名 snake_case。所有"个人数据"表均含 `user_id` 外键，作为权限隔离的强制条件。
+> 约定：数据库使用 PostgreSQL 16 + pgvector，缓存使用 Redis 7，字段命名 snake_case。所有"个人数据"表均含 `user_id` 外键，作为权限隔离的强制条件。
 
 ## 1. 表清单与关系
 
@@ -71,7 +71,8 @@ users 1 ── N study_plans 1 ── N study_plan_items
 | document_id | INTEGER | FK → course_documents, NOT NULL | |
 | chunk_index | INTEGER | NOT NULL | 切片序号 |
 | content | TEXT | NOT NULL | 切片文本 |
-| embedding | BLOB / VECTOR | | 向量（或存向量库，见设计要点） |
+| search_text | TEXT | NOT NULL | Jieba 分词后的全文检索文本 |
+| embedding | VECTOR(512) | | BGE 查询/文档向量 |
 
 ### study_plans 学习计划表
 
@@ -106,9 +107,10 @@ users 1 ── N study_plans 1 ── N study_plan_items
 - 实现方式：FastAPI 依赖注入解析 JWT → 得到当前 user_id → 传入工具层
 
 ### 3.2 RAG 存储（N2）
-- 方案 A（推荐开发用）：`document_chunks.content` + `embedding` 列，简单易演示
-- 方案 B（可选增强）：embedding 存独立向量库（如 chromadb），document_chunks 仅存文本与元数据
-- 检索：按 embedding 相似度取 top-k 切片，连同来源文档信息作为 Agent 上下文
+- `document_chunks.content` 保存原文，`search_text` 保存 Jieba `cut_for_search` 结果，`embedding` 使用 pgvector `VECTOR(512)`。
+- pgvector HNSW 索引参数为 `m=24`、`ef_construction=200`，查询会话使用 `hnsw.ef_search=100`；全文召回使用 `to_tsvector('simple', search_text)` 上的 GIN 索引。
+- 检索先做 Query Rewrite，再执行 pgvector 向量召回与 PostgreSQL `tsvector/ts_rank_cd` 关键词召回，经 RRF（`K=60`）和可选 Rerank 后，按单文档最多 2 段去重并返回 Top-10。
+- Redis 缓存 Query Rewrite 10 分钟、最终检索结果 60 秒；文档变更时按用户失效缓存。Rerank 未配置或失败时保持 RRF 顺序。
 
 ### 3.3 模拟数据（N4）
 - 预置 2-3 个学生账号（如 student01 / student02，密码同账号名）

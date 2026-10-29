@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,7 +22,7 @@ class CourseDocument(Base):
 
 
 class DocumentChunk(Base):
-    """文档切片（RAG），embedding 在 M4 填充。"""
+    """文档切片（RAG），向量和 Jieba 检索文本同时落库。"""
 
     __tablename__ = "document_chunks"
 
@@ -29,4 +30,5 @@ class DocumentChunk(Base):
     document_id: Mapped[int] = mapped_column(ForeignKey("course_documents.id"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[str | None] = mapped_column(Text)  # JSON 字符串或向量库引用
+    search_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(512))

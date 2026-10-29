@@ -3,7 +3,7 @@ from pathlib import Path
 
 from app.database import SessionLocal
 from app.mcp.server import get_my_schedule, save_study_plan
-from app.models.document import CourseDocument
+from app.models.document import CourseDocument, DocumentChunk
 from app.rag.indexer import index_document
 from app.rag.retriever import retrieve
 
@@ -16,13 +16,19 @@ print(f"student01 课表 {len(rows)} 条，示例: {rows[0]['course_name']} {row
 print("== 2. RAG：对样例讲义切片 + 向量化 ==")
 db = SessionLocal()
 try:
-    doc = db.query(CourseDocument).filter(CourseDocument.filename == SAMPLE.name).first()
+    doc = (
+        db.query(CourseDocument)
+        .filter(CourseDocument.user_id == 1, CourseDocument.filename == SAMPLE.name)
+        .first()
+    )
     if doc is None:
         print("未找到样例文档，先写入一条记录")
         doc = CourseDocument(user_id=1, filename=SAMPLE.name, file_path=str(SAMPLE), file_type="md", status="pending")
         db.add(doc)
         db.commit()
         db.refresh(doc)
+    db.query(DocumentChunk).filter(DocumentChunk.document_id == doc.id).delete()
+    db.commit()
     index_document(db, doc, SAMPLE.read_text(encoding="utf-8"))
     print(f"状态: {doc.status}")
 

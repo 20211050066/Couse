@@ -9,19 +9,24 @@ from pathlib import Path
 # 必须在导入 huggingface_hub（fastembed 依赖）之前设置
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
-from fastembed import TextEmbedding  # noqa: E402
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastembed import TextEmbedding
 
 QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 CACHE_DIR = os.environ.get("FASTEMBED_CACHE_PATH") or str(
     Path(__file__).resolve().parents[2] / "data" / "fastembed_cache"
 )
 
-_model: TextEmbedding | None = None
+_model: "TextEmbedding | None" = None
 
 
-def get_model() -> TextEmbedding:
+def get_model() -> "TextEmbedding":
     global _model
     if _model is None:
+        from fastembed import TextEmbedding
+
         _model = TextEmbedding(model_name="BAAI/bge-small-zh-v1.5", cache_dir=CACHE_DIR)
     return _model
 
