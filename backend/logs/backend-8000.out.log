@@ -1,0 +1,15 @@
+INFO:     127.0.0.1:59978 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59981 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59979 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59989 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59990 - "POST /api/chat HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60056 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60059 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60058 - "GET /api/conversations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60079 - "GET /api/schedules/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60118 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60140 - "GET /api/assignments HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60145 - "GET /api/stats/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60150 - "GET /api/conversations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60171 - "GET /api/scores/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60176 - "GET /api/conversations HTTP/1.1" 200 OK

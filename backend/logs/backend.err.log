@@ -1,0 +1,16 @@
+INFO:     Started server process [41044]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8010 (Press CTRL+C to quit)
+[10/29/26 17:18:50] INFO     Processing request of type           server.py:709
+                             ListToolsRequest                                  
+[10/29/26 17:18:53] INFO     Processing request of type           server.py:709
+                             CallToolRequest                                   
+                    INFO     Processing request of type           server.py:709
+                             ListToolsRequest                                  
+[10/29/26 17:19:06] INFO     Processing request of type           server.py:709
+                             ListToolsRequest                                  
+[10/29/26 17:19:08] INFO     Processing request of type           server.py:709
+                             CallToolRequest                                   
+                    INFO     Processing request of type           server.py:709
+                             ListToolsRequest                                  
